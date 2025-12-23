@@ -68,18 +68,45 @@ class BaseImageDataset(BaseDataset):
 
 
 class ImageDataset(Dataset):
-    def __init__(self, dataset, transform=None):
+    def __init__(self, dataset, transform=None,dataset_name = None):
         self.dataset = dataset
         self.transform = transform
+        self.dataset_name = dataset_name
+
+        self.pid_dict = {}
+        pids = list()
+        for i, item in enumerate(dataset):
+            if item[1] in pids: continue
+            pids.append(item[1])
+        self.pids = pids
+        # if self.relabel:
+        self.pid_dict = dict([(p, i) for i, p in enumerate(self.pids)])
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        img_path, pid, camid, trackid = self.dataset[index]
-        img = read_image(img_path)
+        if self.dataset_name == "uavhuman_attr":
+            img_path, pid, camid, trackid,attributes = self.dataset[index]
+            img = read_image(img_path)
 
-        if self.transform is not None:
-            img = self.transform(img)
+            if self.transform is not None:
+                img = self.transform(img)
+            # pid_domain_wise = None
+            # if self.relabel:
+            #     pid_domain_wise = self.pid_dict_domain_wise[pid]
+            pid = self.pid_dict[pid]
 
-        return img, pid, camid, trackid, img_path.split('/')[-1]
+            return img, pid, camid, trackid, img_path.split('/')[-1],attributes
+        else:
+            img_path, pid, camid, trackid = self.dataset[index]
+            img = read_image(img_path)
+
+            if self.transform is not None:
+                img = self.transform(img)
+            # pid_domain_wise = None
+            # if self.relabel:
+            #     pid_domain_wise = self.pid_dict_domain_wise[pid]
+            pid = self.pid_dict[pid]
+
+            return img, pid, camid, trackid, img_path.split('/')[-1]

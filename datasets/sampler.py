@@ -14,15 +14,25 @@ class RandomIdentitySampler(Sampler):
     - batch_size (int): number of examples in a batch.
     """
 
-    def __init__(self, data_source, batch_size, num_instances):
+    def __init__(self,cfg, data_source, batch_size, num_instances):
         self.data_source = data_source
         self.batch_size = batch_size
         self.num_instances = num_instances
         self.num_pids_per_batch = self.batch_size // self.num_instances
         self.index_dic = defaultdict(list) #dict with list value
+
         #{783: [0, 5, 116, 876, 1554, 2041],...,}
-        for index, (_, pid, _, _) in enumerate(self.data_source):
-            self.index_dic[pid].append(index)
+        if cfg.DATASETS.NAMES == "uavhuman_attr":
+            for index, (_, pid, _, _,_) in enumerate(self.data_source):
+                self.index_dic[pid].append(index)
+        else:
+            for index, (_, pid, _, _) in enumerate(self.data_source):
+                self.index_dic[pid].append(index)
+        
+        # has attributes 
+        
+            
+
         self.pids = list(self.index_dic.keys())
 
         # estimate number of examples in an epoch

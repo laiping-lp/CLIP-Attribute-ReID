@@ -118,7 +118,7 @@ class RandomIdentitySampler_DDP(Sampler):
     - batch_size (int): number of examples in a batch.
     """
 
-    def __init__(self, data_source, batch_size, num_instances):
+    def __init__(self,cfg, data_source, batch_size, num_instances):
         self.data_source = data_source
         self.batch_size = batch_size
         self.world_size = dist.get_world_size()

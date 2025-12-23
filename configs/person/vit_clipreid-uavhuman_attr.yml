@@ -68,9 +68,10 @@ TEST:
   FEAT_NORM: 'yes'
 
 DATASETS:
-  NAMES: ('market1501')
+  NAMES: ('uavhuman_attr')
+  # NAMES: ('uavhuman')
   ROOT_DIR: ('/data5/laiping/datasets')
-OUTPUT_DIR: '/data5/laiping/codes/CLIP-ReID/exp/vit_clipreid'
+OUTPUT_DIR: '/data5/laiping/codes/CLIP-ReID/exp/vit_clipreid_uavhuman_attr'
 
 #   NAMES: ('dukemtmc')
 #   ROOT_DIR: ('')
@@ -84,4 +85,4 @@ OUTPUT_DIR: '/data5/laiping/codes/CLIP-ReID/exp/vit_clipreid'
 #   ROOT_DIR: ('')
 # OUTPUT_DIR: ''
 
-# CUDA_VISIBLE_DEVICES=3 python train_clipreid.py --config_file configs/person/vit_clipreid.yml
+# CUDA_VISIBLE_DEVICES=3 python train_clipreid.py --config_file /data5/laiping/codes/CLIP-ReID/configs/person/vit_clipreid-uavhuman_attr.yml

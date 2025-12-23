@@ -7,13 +7,15 @@ from solver.lr_scheduler import WarmupMultiStepLR
 from loss.make_loss import make_loss
 from processor.processor_clipreid_stage1 import do_train_stage1
 from processor.processor_clipreid_stage2 import do_train_stage2
+from processor.processor_clipreid_stage1_attr import do_train_stage1_attr
+from processor.processor_clipreid_stage2_attr import do_train_stage2_attr
 import random
 import torch
 import numpy as np
 import os
 import argparse
 from config import cfg
-
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 def set_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -72,29 +74,57 @@ if __name__ == '__main__':
     optimizer_1stage = make_optimizer_1stage(cfg, model)
     scheduler_1stage = create_scheduler(optimizer_1stage, num_epochs = cfg.SOLVER.STAGE1.MAX_EPOCHS, lr_min = cfg.SOLVER.STAGE1.LR_MIN, \
                         warmup_lr_init = cfg.SOLVER.STAGE1.WARMUP_LR_INIT, warmup_t = cfg.SOLVER.STAGE1.WARMUP_EPOCHS, noise_range = None)
+    if cfg.DATASETS.NAMES == "uavhuman_attr":
+        do_train_stage1_attr(
+            cfg,
+            model,
+            train_loader_stage1,
+            optimizer_1stage,
+            scheduler_1stage,
+            args.local_rank
+        )
 
-    do_train_stage1(
-        cfg,
-        model,
-        train_loader_stage1,
-        optimizer_1stage,
-        scheduler_1stage,
-        args.local_rank
-    )
+        optimizer_2stage, optimizer_center_2stage = make_optimizer_2stage(cfg, model, center_criterion)
+        scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,
+                                      cfg.SOLVER.STAGE2.WARMUP_ITERS, cfg.SOLVER.STAGE2.WARMUP_METHOD)
+        
 
-    optimizer_2stage, optimizer_center_2stage = make_optimizer_2stage(cfg, model, center_criterion)
-    scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,
-                                  cfg.SOLVER.STAGE2.WARMUP_ITERS, cfg.SOLVER.STAGE2.WARMUP_METHOD)
+        do_train_stage2_attr(
+            cfg,
+            model,
+            center_criterion,
+            train_loader_stage2,
+            val_loader,
+            optimizer_2stage,
+            optimizer_center_2stage,
+            scheduler_2stage,
+            loss_func,
+            num_query, args.local_rank
+        )
+    else:        
+        do_train_stage1(
+            cfg,
+            model,
+            train_loader_stage1,
+            optimizer_1stage,
+            scheduler_1stage,
+            args.local_rank
+        )
 
-    do_train_stage2(
-        cfg,
-        model,
-        center_criterion,
-        train_loader_stage2,
-        val_loader,
-        optimizer_2stage,
-        optimizer_center_2stage,
-        scheduler_2stage,
-        loss_func,
-        num_query, args.local_rank
-    )
+        
+        optimizer_2stage, optimizer_center_2stage = make_optimizer_2stage(cfg, model, center_criterion)
+        scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,
+                                    cfg.SOLVER.STAGE2.WARMUP_ITERS, cfg.SOLVER.STAGE2.WARMUP_METHOD)
+
+        do_train_stage2(
+            cfg,
+            model,
+            center_criterion,
+            train_loader_stage2,
+            val_loader,
+            optimizer_2stage,
+            optimizer_center_2stage,
+            scheduler_2stage,
+            loss_func,
+            num_query, args.local_rank
+        )

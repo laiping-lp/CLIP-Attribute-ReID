@@ -4,6 +4,7 @@ import argparse
 from datasets.make_dataloader_clipreid import make_dataloader
 from model.make_model_clipreid import make_model
 from processor.processor_clipreid_stage2 import do_inference
+from processor.processor_clipreid_stage2_attr import do_inference_attr
 from utils.logger import setup_logger
 
 
@@ -38,7 +39,7 @@ if __name__ == "__main__":
 
     os.environ['CUDA_VISIBLE_DEVICES'] = cfg.MODEL.DEVICE_ID
 
-    train_loader, train_loader_normal, val_loader, num_query, num_classes, camera_num, view_num = make_dataloader(cfg)
+    train_loader, train_loader_normal, val_loader, num_query, num_classes, camera_num, view_num,query_loader, gallery_loader = make_dataloader(cfg,get_test=True)
 
     model = make_model(cfg, num_class=num_classes, camera_num=camera_num, view_num = view_num)
     model.load_param(cfg.TEST.WEIGHT)
@@ -61,10 +62,17 @@ if __name__ == "__main__":
 
             logger.info("rank_1:{}, rank_5 {} : trial : {}".format(rank_1, rank5, mAP, trial))
         logger.info("sum_rank_1:{:.1%}, sum_rank_5 {:.1%}, sum_mAP {:.1%}".format(all_rank_1.sum()/10.0, all_rank_5.sum()/10.0, all_mAP.sum()/10.0))
-    else:
-       do_inference(cfg,
+    elif cfg.DATASETS.NAMES == "uavhuman_attr":
+        do_inference_attr(cfg,
                  model,
                  val_loader,
+                 query_loader, 
+                 gallery_loader,
                  num_query)
+    else:
+        do_inference(cfg,
+                 model,
+                 val_loader,
+                 num_query) 
 
 

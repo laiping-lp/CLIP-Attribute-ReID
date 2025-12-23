@@ -4,6 +4,8 @@ import numpy as np
 from .clip.simple_tokenizer import SimpleTokenizer as _Tokenizer
 _tokenizer = _Tokenizer()
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+import os
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 def weights_init_kaiming(m):
     classname = m.__class__.__name__
@@ -52,6 +54,7 @@ class TextEncoder(nn.Module):
 class build_transformer(nn.Module):
     def __init__(self, num_classes, camera_num, view_num, cfg):
         super(build_transformer, self).__init__()
+        self.dataset_name = cfg.DATASETS.NAMES
         self.model_name = cfg.MODEL.NAME
         self.cos_layer = cfg.MODEL.COS_LAYER
         self.neck = cfg.MODEL.NECK
@@ -82,6 +85,7 @@ class build_transformer(nn.Module):
         self.h_resolution = int((cfg.INPUT.SIZE_TRAIN[0]-16)//cfg.MODEL.STRIDE_SIZE[0] + 1)
         self.w_resolution = int((cfg.INPUT.SIZE_TRAIN[1]-16)//cfg.MODEL.STRIDE_SIZE[1] + 1)
         self.vision_stride_size = cfg.MODEL.STRIDE_SIZE[0]
+        self.fuse_proj = nn.Linear(1024, 512)
         clip_model = load_clip_to_cpu(self.model_name, self.h_resolution, self.w_resolution, self.vision_stride_size)
         clip_model.to("cuda")
 
@@ -101,12 +105,37 @@ class build_transformer(nn.Module):
             print('camera number is : {}'.format(view_num))
 
         dataset_name = cfg.DATASETS.NAMES
-        self.prompt_learner = PromptLearner(num_classes, dataset_name, clip_model.dtype, clip_model.token_embedding)
+        if dataset_name == "uavhuman_attr":
+            self.prompt_learner = PromptLearnerAttr(num_classes, dataset_name, clip_model.dtype, clip_model.token_embedding)
+        else:
+            self.prompt_learner = PromptLearner(num_classes, dataset_name, clip_model.dtype, clip_model.token_embedding)
+        
         self.text_encoder = TextEncoder(clip_model)
 
-    def forward(self, x = None, label=None, get_image = False, get_text = False, cam_label= None, view_label=None):
+    def forward(self, x = None, label=None, get_image = False, get_text = False, get_expansion=False, cam_label= None, view_label=None,gender_label=None,hat_label=None,backpack_label=None,ucc_label=None,ucs_label=None,lcc_label=None,lcs_label=None):
+        if get_expansion == True:
+            if self.dataset_name == "uavhuman_attr":
+                prompts = self.prompt_learner(self.training,label,gender_label,ucc_label,ucs_label,lcc_label,lcs_label,hat_label,backpack_label)
+            else:
+                prompts = self.prompt_learner(self.training,label)
+            text_features = self.text_encoder(prompts, self.prompt_learner.tokenized_prompts)
+            image_features_last, image_features, image_features_proj = self.image_encoder(x) 
+            if self.model_name == 'RN50':
+                image_features = image_features_proj[0]
+            elif self.model_name == 'ViT-B-16':
+                image_features = image_features_proj[:,0]
+            # 做法一：拼接 concat（信息保留最多，但维度变 1024）先归一化再拼
+            t = torch.nn.functional.normalize(text_features, dim=-1)
+            i = torch.nn.functional.normalize(image_features, dim=-1)
+            fused = self.fuse_proj(torch.cat([i, t], dim=-1))  # [B,512]
+            fused = torch.nn.functional.normalize(fused, dim=-1)
+            return image_features
+
         if get_text == True:
-            prompts = self.prompt_learner(label) 
+            if self.dataset_name == "uavhuman_attr":
+                prompts = self.prompt_learner(self.training,label,gender_label,ucc_label,ucs_label,lcc_label,lcs_label,hat_label,backpack_label)
+            else:
+                prompts = self.prompt_learner(self.training,label)
             text_features = self.text_encoder(prompts, self.prompt_learner.tokenized_prompts)
             return text_features
 
@@ -152,6 +181,7 @@ class build_transformer(nn.Module):
             else:
                 return torch.cat([img_feature, img_feature_proj], dim=1)
 
+        
 
     def load_param(self, trained_path):
         param_dict = torch.load(trained_path)
@@ -220,7 +250,7 @@ class PromptLearner(nn.Module):
         self.num_class = num_class
         self.n_cls_ctx = n_cls_ctx
 
-    def forward(self, label):
+    def forward(self, get_train,label):
         cls_ctx = self.cls_ctx[label] 
         b = label.shape[0]
         prefix = self.token_prefix.expand(b, -1, -1) 
@@ -237,3 +267,140 @@ class PromptLearner(nn.Module):
 
         return prompts 
 
+# A photo of a <Gender> person wearing <UCC> <UCS> upper clothes and <LCC> <LCS> lower clothes, with <Hat> hat and <Backpack> backpack.
+
+class PromptLearnerAttr(nn.Module):
+    def __init__(self, num_class, dataset_name, dtype, token_embedding,
+                    num_gender=2,num_ucc=12,num_ucs=4,num_lcc=12,num_lcs=4,num_hat=5,num_backpack=5,
+        ):
+        super().__init__()
+        if dataset_name == "VehicleID" or dataset_name == "veri":
+            ctx_init = "A photo of a X X X X vehicle."
+        else:
+            ctx_init = "A photo of a <Gender> wearing <UCC> <UCS> and <LCC> <LCS>, with <Hat> hat and <Backpack> backpack."
+
+        ctx_dim = 512
+        # use given words to initialize context vectors
+        ctx_init = ctx_init.replace("_", " ")
+        n_ctx = 4
+        
+        tokenized_prompts = clip.tokenize(ctx_init).cuda() 
+        with torch.no_grad():
+            embedding = token_embedding(tokenized_prompts).type(dtype) 
+        self.tokenized_prompts = tokenized_prompts  # torch.Tensor
+
+        # 4. 为每个属性建立 soft prompt 表
+        #    这里每个属性只用 1 个 token；如果想更强表示力，可以设成 >1
+        n_ctx_gender   = 4
+        n_ctx_ucc      = 4
+        n_ctx_ucs      = 4
+        n_ctx_lcc      = 4
+        n_ctx_lcs      = 4
+        n_ctx_hat      = 4
+        n_ctx_backpack = 4
+        n_ctx_cls = 4
+
+        n_cls_ctx = 32
+
+        self.gender_ctx = nn.Parameter(
+            torch.empty(num_gender, n_ctx_gender, ctx_dim, dtype=dtype)
+        )
+        self.ucc_ctx = nn.Parameter(
+            torch.empty(num_ucc, n_ctx_ucc, ctx_dim, dtype=dtype)
+        )
+        self.ucs_ctx = nn.Parameter(
+            torch.empty(num_ucs, n_ctx_ucs, ctx_dim, dtype=dtype)
+        )
+        self.lcc_ctx = nn.Parameter(
+            torch.empty(num_lcc, n_ctx_lcc, ctx_dim, dtype=dtype)
+        )
+        self.lcs_ctx = nn.Parameter(
+            torch.empty(num_lcs, n_ctx_lcs, ctx_dim, dtype=dtype)
+        )
+        self.hat_ctx = nn.Parameter(
+            torch.empty(num_hat, n_ctx_hat, ctx_dim, dtype=dtype)
+        )
+        self.backpack_ctx = nn.Parameter(
+            torch.empty(num_backpack, n_ctx_backpack, ctx_dim, dtype=dtype)
+        )
+        # 有标签的 cls prompt 表
+        self.cls_ctx = nn.Parameter(torch.empty(num_class, n_ctx_cls, ctx_dim, dtype=dtype))
+        nn.init.normal_(self.cls_ctx, std=0.02)
+
+        # 无标签时用的“uncond cls prompt”
+        self.cls_ctx_uncond = nn.Parameter(torch.empty(1, n_ctx_cls, ctx_dim, dtype=dtype))
+        nn.init.normal_(self.cls_ctx_uncond, std=0.02)
+        
+        # cls_vectors = torch.empty(num_class, n_ctx_cls, ctx_dim, dtype=dtype) 
+        # nn.init.normal_(cls_vectors, std=0.02)
+        # self.cls_ctx = nn.Parameter(cls_vectors) 
+
+         
+
+        for param in [self.gender_ctx, self.ucc_ctx, self.ucs_ctx,
+                      self.lcc_ctx, self.lcs_ctx, self.hat_ctx, self.backpack_ctx]:
+            nn.init.normal_(param, std=0.02)
+        
+        self.ctx_dim = ctx_dim
+
+        self.register_buffer("token_prefix", embedding[:, :n_ctx + 1, :])  
+        self.register_buffer("token_suffix", embedding[:, n_ctx + 1 + n_cls_ctx: , :])  
+
+        self.num_class = num_class
+        self.n_cls_ctx = n_cls_ctx
+
+    def forward(self, 
+                get_train,
+                label,
+                gender_idx: torch.Tensor,    # [B]
+                ucc_idx: torch.Tensor,       # [B]
+                ucs_idx: torch.Tensor,       # [B]
+                lcc_idx: torch.Tensor,       # [B]
+                lcs_idx: torch.Tensor,       # [B]
+                hat_idx: torch.Tensor,       # [B]
+                backpack_idx: torch.Tensor,  # [B]):
+    ):
+        """
+        输入：每张图的属性标签索引
+        输出：对应 batch 的 prompt embedding，形状 [B, L_text, ctx_dim]
+        """
+
+        B = gender_idx.shape[0]
+        
+        # 1. prefix / suffix broadcast 到 batch
+        prefix = self.token_prefix.expand(B, -1, -1)  # [B, P, dim]
+        suffix = self.token_suffix.expand(B, -1, -1)  # [B, S, dim]
+        
+        gender_ctx   = self.gender_ctx[gender_idx]      # [B, n_ctx_gender, dim]
+        ucc_ctx      = self.ucc_ctx[ucc_idx]            # [B, n_ctx_ucc, dim]
+        ucs_ctx      = self.ucs_ctx[ucs_idx]            # [B, n_ctx_ucs, dim]
+        lcc_ctx      = self.lcc_ctx[lcc_idx]            # [B, n_ctx_lcc, dim]
+        lcs_ctx      = self.lcs_ctx[lcs_idx]            # [B, n_ctx_lcs, dim]
+        hat_ctx      = self.hat_ctx[hat_idx]            # [B, n_ctx_hat, dim]
+        backpack_ctx = self.backpack_ctx[backpack_idx]  # [B, n_ctx_backpack, dim]
+        
+        if label is None:
+            cls_part = self.cls_ctx_uncond.expand(B, -1, -1)  # [B,n_ctx_cls,D]
+        else:
+            label = label.view(-1).long()                     # 确保 [B]
+            cls_part = self.cls_ctx[label]                    # [B,n_ctx_cls,D]
+        prompts = torch.cat(
+            [
+                prefix,  # (n_cls, 1, dim)
+                cls_part,
+                gender_ctx,
+                ucc_ctx,
+                ucs_ctx,
+                lcc_ctx,
+                lcs_ctx,
+                hat_ctx,
+                backpack_ctx,     # (n_cls, n_ctx, dim)
+                suffix,  # (n_cls, *, dim)
+            ],
+            dim=1,
+        ) 
+        
+        return prompts 
+
+
+        
