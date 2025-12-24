@@ -9,6 +9,7 @@ from processor.processor_clipreid_stage1 import do_train_stage1
 from processor.processor_clipreid_stage2 import do_train_stage2
 from processor.processor_clipreid_stage1_attr import do_train_stage1_attr
 from processor.processor_clipreid_stage2_attr import do_train_stage2_attr
+from processor.processor_clipreid_stage2_attr_train import do_train_stage2_attr_train
 import random
 import torch
 import numpy as np
@@ -88,8 +89,7 @@ if __name__ == '__main__':
         scheduler_2stage = WarmupMultiStepLR(optimizer_2stage, cfg.SOLVER.STAGE2.STEPS, cfg.SOLVER.STAGE2.GAMMA, cfg.SOLVER.STAGE2.WARMUP_FACTOR,
                                       cfg.SOLVER.STAGE2.WARMUP_ITERS, cfg.SOLVER.STAGE2.WARMUP_METHOD)
         
-
-        do_train_stage2_attr(
+        do_train_stage2_attr_train(
             cfg,
             model,
             center_criterion,
@@ -101,6 +101,19 @@ if __name__ == '__main__':
             loss_func,
             num_query, args.local_rank
         )
+        # do_train_stage2_attr(
+        #     cfg,
+        #     model,
+        #     center_criterion,
+        #     train_loader_stage2,
+        #     val_loader,
+        #     optimizer_2stage,
+        #     optimizer_center_2stage,
+        #     scheduler_2stage,
+        #     loss_func,
+        #     num_query, args.local_rank
+        # )
+
     else:        
         do_train_stage1(
             cfg,

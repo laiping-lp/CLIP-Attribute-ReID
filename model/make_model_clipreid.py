@@ -112,7 +112,7 @@ class build_transformer(nn.Module):
         
         self.text_encoder = TextEncoder(clip_model)
 
-    def forward(self, x = None, label=None, get_image = False, get_text = False, get_expansion=False, cam_label= None, view_label=None,gender_label=None,hat_label=None,backpack_label=None,ucc_label=None,ucs_label=None,lcc_label=None,lcs_label=None):
+    def forward(self, x = None, label=None, get_image = False, get_text = False, get_expansion=False, get_i2t=False,cam_label= None, view_label=None,gender_label=None,hat_label=None,backpack_label=None,ucc_label=None,ucs_label=None,lcc_label=None,lcs_label=None):
         if get_expansion == True:
             if self.dataset_name == "uavhuman_attr":
                 prompts = self.prompt_learner(self.training,label,gender_label,ucc_label,ucs_label,lcc_label,lcs_label,hat_label,backpack_label)
@@ -129,7 +129,7 @@ class build_transformer(nn.Module):
             i = torch.nn.functional.normalize(image_features, dim=-1)
             fused = self.fuse_proj(torch.cat([i, t], dim=-1))  # [B,512]
             fused = torch.nn.functional.normalize(fused, dim=-1)
-            return image_features
+            return image_features         
 
         if get_text == True:
             if self.dataset_name == "uavhuman_attr":
@@ -170,9 +170,22 @@ class build_transformer(nn.Module):
         feat_proj = self.bottleneck_proj(img_feature_proj) 
         
         if self.training:
-            cls_score = self.classifier(feat)
-            cls_score_proj = self.classifier_proj(feat_proj)
-            return [cls_score, cls_score_proj], [img_feature_last, img_feature, img_feature_proj], img_feature_proj
+            if get_i2t == True:
+                if self.dataset_name == "uavhuman_attr":
+                    prompts = self.prompt_learner(self.training,label,gender_label,ucc_label,ucs_label,lcc_label,lcs_label,hat_label,backpack_label)
+                else:
+                    prompts = self.prompt_learner(self.training,label)
+                t_feats = self.text_encoder(prompts, self.prompt_learner.tokenized_prompts)
+                i_feats = img_feature_proj
+                image_logits = self.classifier_proj(i_feats)
+                text_logits = self.classifier_proj(t_feats)
+                cls_score = self.classifier(feat)
+                cls_score_proj = self.classifier_proj(feat_proj)
+                return [cls_score, cls_score_proj], [img_feature_last, img_feature, img_feature_proj],t_feats,i_feats,text_logits,image_logits
+            else:
+                cls_score = self.classifier(feat)
+                cls_score_proj = self.classifier_proj(feat_proj)
+                return [cls_score, cls_score_proj], [img_feature_last, img_feature, img_feature_proj], img_feature_proj
 
         else:
             if self.neck_feat == 'after':

@@ -50,6 +50,22 @@ _C.MODEL.IF_LABELSMOOTH = 'on'
 # If train with arcface loss, options: 'True', 'False'
 _C.MODEL.COS_LAYER = False
 
+_C.MODEL.IF_ITC_LOSS = "on"
+
+_C.MODEL.ITC_LOSS_WEIGHT = 1.0
+
+_C.MODEL.IF_SDM_LOSS = "on"
+
+_C.MODEL.SDM_LOSS_WEIGHT = 1.0
+
+_C.MODEL.IF_CMPM_LOSS = "on"
+
+_C.MODEL.CMPM_LOSS_WEIGHT = 1.0
+
+_C.MODEL.IF_CM_ID_LOSS = "on"
+
+_C.MODEL.ID2_LOSS_WEIGHT = 1.0
+
 # Transformer setting
 _C.MODEL.DROP_PATH = 0.1
 _C.MODEL.DROP_OUT = 0.0
